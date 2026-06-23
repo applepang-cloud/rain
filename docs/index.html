@@ -9,7 +9,7 @@
   .bg {
     position:fixed; inset:0; background-size:cover; background-position:center;
     opacity:0; transform:scale(1); transform-origin:center center;
-    transition:opacity 1.2s ease, transform 1.2s ease; will-change:opacity,transform;
+    transition:opacity 1.92s ease, transform 1.92s ease; will-change:opacity,transform;
   }
   #mood {
     position:fixed; inset:0; pointer-events:none;
@@ -23,7 +23,7 @@
   #heart { position:fixed; inset:0; display:none; align-items:center; justify-content:center;
            pointer-events:none; z-index:7; }
   #heart svg { width:34vmin; height:34vmin; transform:scale(0.2); opacity:0;
-               transition:transform 0.9s cubic-bezier(.2,1.3,.4,1), opacity 0.9s ease; }
+               transition:transform 1.44s cubic-bezier(.2,1.3,.4,1), opacity 1.44s ease; }
   #heart.show svg { transform:scale(1); opacity:1; }
 
   /* 하단 자막 */
@@ -32,7 +32,7 @@
     font-family:-apple-system,'Segoe UI','Malgun Gothic',sans-serif;
     font-size:20px; letter-spacing:1px; line-height:1.5; text-align:center;
     padding:22px 18px calc(22px + env(safe-area-inset-bottom));
-    opacity:0; transition:opacity 0.8s ease; pointer-events:none; z-index:8;
+    opacity:0; transition:opacity 1.28s ease; pointer-events:none; z-index:8;
     text-shadow:0 1px 3px rgba(0,0,0,0.6);
   }
   #subtitle .caret { display:inline-block; width:2px; margin-left:2px; background:#fff;
@@ -167,7 +167,7 @@
   const woman = makeChar(0xf2f4f7, true);
 
   function updateChar(c,dt){
-    const k=1-Math.pow(0.001,dt); // 부드러운 추적
+    const k=1-Math.pow(0.001,dt/SLOW); // 부드러운 추적 (감속)
     const px=c.tx*W, py=c.ty*H, ps=c.tscale*minF();
     const moving = Math.abs(c.x-px) > 1.2 || Math.abs(c.y-py) > 1.2;
     c.x=lerp(c.x,px,k); c.y=lerp(c.y,py,k); c.scale=lerp(c.scale,ps,k);
@@ -215,7 +215,7 @@
     nxt.style.backgroundImage=`url('${url}')`;
     nxt.style.opacity='0'; nxt.style.transform='scale(0.9)';
     void nxt.offsetWidth; // reflow
-    nxt.style.transition='opacity 1.2s ease, transform 1.2s ease';
+    nxt.style.transition='opacity 1.92s ease, transform 1.92s ease';
     nxt.style.opacity='1'; nxt.style.transform='scale(1)';   // 페이드인 + 확대
     cur.style.opacity='0'; cur.style.transform='scale(0.85)'; // 페이드아웃 + 축소
     bgActive=nxt; bgOther=cur;
@@ -227,8 +227,8 @@
   function showSubtitle(text){
     if(typeTimer){ clearTimeout(typeTimer); typeTimer=null; }
     subtitleEl.style.opacity='1'; caretEl.style.display='inline-block';
-    let i=0; const tick=()=>{ if(i<=text.length){ subtextEl.textContent=text.slice(0,i); i++; typeTimer=setTimeout(tick,150); }
-      else { typeTimer=setTimeout(()=>{ caretEl.style.display='none'; },1400); } };
+    let i=0; const tick=()=>{ if(i<=text.length){ subtextEl.textContent=text.slice(0,i); i++; typeTimer=setTimeout(tick,240); }
+      else { typeTimer=setTimeout(()=>{ caretEl.style.display='none'; },2240); } };
     tick();
   }
   function hideSubtitle(){ subtitleEl.style.opacity='0'; }
@@ -265,88 +265,94 @@
   function scheduleThunder(){ const w=9000+Math.random()*16000; setTimeout(()=>{ thunder(); scheduleThunder(); },w); }
 
   // ---------- 인트로 보행 (scene 0) ----------
-  const INTRO = { startX:0.50, startY:0.32, startScale:0.55, endX:0.47, endY:0.09, endScale:1.20 };
+  const INTRO = { startX:0.48, startY:0.14, startScale:0.55, endX:0.47, endY:0.06, endScale:1.20 };
+  const SLOW = 1.6;            // 연출 속도 60% 감속 (지속시간 ×1.6)
+  const T = (ms)=> ms*SLOW;    // setTimeout 지연 감속
   let scene_n = 0;          // 0=인트로, 1..7=시퀀스
   let introProgress=0, introPhase='walk', introStop=0, introSubShown=false, introDone=false;
   const INTRO_SPEED=0.085;
 
   function updateIntro(dt){
-    man.mat.opacity = Math.min(1, man.mat.opacity + dt*2.2); // 등장 페이드인
-    if(introPhase==='walk'){ introProgress+=dt*INTRO_SPEED; if(introProgress>=1){ introProgress=1; introPhase='stop'; introStop=0; } }
+    man.mat.opacity = Math.min(1, man.mat.opacity + dt*2.2/SLOW); // 등장 페이드인(감속)
+    if(introPhase==='walk'){ introProgress+=dt*INTRO_SPEED/SLOW; if(introProgress>=1){ introProgress=1; introPhase='stop'; introStop=0; } }
     const p=introProgress;
     man.tx=lerp(INTRO.startX,INTRO.endX,p); man.ty=lerp(INTRO.startY,INTRO.endY,p);
     man.tscale=lerp(INTRO.startScale,INTRO.endScale,p); man.tOpacity=1;
     // 이동 자체는 updateChar의 추적이 처리하지만, 인트로는 즉시 따라가도록 강제
     man.x=man.tx*W; man.y=man.ty*H; man.scale=man.tscale*minF();
     if(introPhase==='walk'){
-      man.phase+=dt*4.2; const sw=Math.sin(man.phase);
+      man.phase+=dt*4.2/SLOW; const sw=Math.sin(man.phase);
       man.legL.rotation.z=sw*0.5; man.legR.rotation.z=-sw*0.5;
       man.armL.rotation.z=-sw*0.32; man.armR.rotation.z=sw*0.32;
       const bob=Math.abs(Math.cos(man.phase))*5; man.upper.position.y=-bob; man.head.rotation.z=Math.sin(man.phase*0.5)*0.04-0.06;
     } else {
-      introStop+=dt; man.tDroop=1; man.droop=easeInOut(Math.min(introStop/1.6,1));
+      introStop+=dt; man.tDroop=1; man.droop=easeInOut(Math.min(introStop/(1.6*SLOW),1));
       man.legL.rotation.z=lerp(man.legL.rotation.z,0,0.18); man.legR.rotation.z=lerp(man.legR.rotation.z,0,0.18);
       man.upper.position.y=lerp(man.upper.position.y,-6*man.droop,0.2);
       man.head.rotation.z=-0.06-0.55*man.droop; man.upper.rotation.z=0.12*man.droop;
       man.head.position.y=104-16*man.droop;
-      if(!introSubShown && introStop>1.0){ introSubShown=true; showSubtitle('나만 혼자인 것 같다'); }
-      if(!introDone && introStop>3.0){ introDone=true; showTouch(); }
+      if(!introSubShown && introStop>1.0*SLOW){ introSubShown=true; showSubtitle('나만 혼자인 것 같다'); }
+      if(!introDone && introStop>3.0*SLOW){ introDone=true; showTouch(); }
     }
     man.group.position.set(man.x,man.y,0); man.group.scale.set(man.scale,man.scale,1);
     man.group.visible=true;
   }
 
   // ---------- 시퀀스 (scene 1..7) ----------
+  let sceneTimers=[];
+  function sT(fn,ms){ const id=setTimeout(fn,ms); sceneTimers.push(id); return id; }
+  function clearSceneTimers(){ sceneTimers.forEach(clearTimeout); sceneTimers=[]; }
+
   function enterScene(n){
-    scene_n=n; hideTouch(); hideSubtitle();
+    scene_n=n; clearSceneTimers(); hideTouch(); hideSubtitle();
     if(n>=1) man.lookAround=false;
     switch(n){
       case 1: // 이미지1 — 남자 두리번, "혼자가 아니에요"
         setBackground('1.png');
         man.tDroop=0; man.lookAround=true; man.tx=0.50; man.ty=0.12; man.tscale=1.05; man.tOpacity=1;
         woman.tOpacity=0; woman.group.visible=false;
-        setTimeout(()=>showSubtitle('혼자가 아니에요'),700);
-        setTimeout(showTouch,2600);
+        sT(()=>showSubtitle('혼자가 아니에요'),T(700));
+        sT(showTouch,T(2600));
         break;
       case 2: // 이미지2 — 반대편에서 하얀 여자 등장(걸어나옴)
         setBackground('2.png');
         man.lookAround=false; man.tx=0.64; man.ty=0.12; man.tscale=1.05;
         woman.group.visible=true; woman.x=-0.1*W; woman.y=0.12*H; woman.scale=1.0*minF();
         woman.tx=0.40; woman.ty=0.12; woman.tscale=1.05; woman.tOpacity=1;
-        setTimeout(showTouch,2600);
+        sT(showTouch,T(3200));
         break;
       case 3: // 이미지3 — 둘이 더 가까이
         setBackground('3.png');
         man.tx=0.58; man.ty=0.11; man.tscale=1.1;
         woman.tx=0.45; woman.ty=0.11; woman.tscale=1.1;
-        setTimeout(showTouch,2200);
+        sT(showTouch,T(2200));
         break;
       case 4: // 이미지4 — 여자 팔 벌리며 설명
         setBackground('4.png');
         man.tx=0.58; man.ty=0.11; man.tscale=1.1;
         woman.tx=0.44; woman.ty=0.11; woman.tscale=1.1; woman.tArmSpread=1;
-        setTimeout(()=>showSubtitle('우린 하나였어요. 원래'),700);
-        setTimeout(showTouch,2800);
+        sT(()=>showSubtitle('우린 하나였어요. 원래'),T(700));
+        sT(showTouch,T(2800));
         break;
       case 5: // 이미지5 — 여자가 남자를 안아줌
         setBackground('5.png');
         woman.tArmSpread=0; woman.tHug=1;
         man.tx=0.545; man.ty=0.11; man.tscale=1.12;
         woman.tx=0.50; woman.ty=0.11; woman.tscale=1.12;
-        setTimeout(showTouch,2400);
+        sT(showTouch,T(2400));
         break;
       case 6: // 이미지6 — 둘이 하나로 합쳐짐
         setBackground('6.png');
         man.tx=0.52; man.ty=0.11; man.tscale=1.15;
         woman.tx=0.52; woman.ty=0.11; woman.tscale=1.15;
-        setTimeout(()=>{ woman.tOpacity=0; man.tOpacity=0; },1700); // 겹쳐지며 사라짐
-        setTimeout(showTouch,2600);
+        sT(()=>{ woman.tOpacity=0; man.tOpacity=0; },T(2400)); // 겹쳐지며 사라짐
+        sT(showTouch,T(3400));
         break;
       case 7: // 하얗고 검은 하트
         // 배경은 6 유지. 캐릭터 숨기고 하트 등장.
         man.tOpacity=0; woman.tOpacity=0;
         heartEl.style.display='flex'; void heartEl.offsetWidth; heartEl.classList.add('show');
-        showSubtitle('우린, 하나');
+        showSubtitle('우리는 하나야');
         break;
     }
   }
