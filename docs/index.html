@@ -195,8 +195,8 @@
   // 보행 구간: 화면 하단의 비 젖은 거리(예시 이미지 영역) 안에서만 걷는다.
   // (three.js 좌표: y=0 바닥, y=H 위. 작은 y = 더 가까움/아래쪽)
   const PATH = {
-    startX: 0.84, startY: 0.44, startScale: 0.30,   // 화면 오른쪽 건물/울타리 옆에서 출발
-    endX:   0.47, endY:   0.17, endScale:   0.62     // 가까이(크게) 하단 거리로 다가옴
+    startX: 0.49, startY: 0.14, startScale: 0.40,   // 길 위 하단 중앙(가로49%/세로86%)에서 출발
+    endX:   0.47, endY:   0.07, endScale:   0.60     // 카메라 쪽(앞)으로 조금 걸어와 멈춤
   };
 
   const WALK_SPEED = 0.085;   // progress/s  → 약 12초 보행
