@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>비 오는 거리</title>
+<style>
+  html, body { margin:0; padding:0; height:100%; background:#1a1f24; overflow:hidden; }
+  #scene {
+    position:fixed; inset:0;
+    background-image:url('rain.png');
+    background-size:cover;
+    background-position:center;
+  }
+  /* 전체 화면을 살짝 가라앉히는 비 오는 분위기 틴트 */
+  #mood {
+    position:fixed; inset:0; pointer-events:none;
+    background:radial-gradient(120% 80% at 60% 35%, rgba(20,30,38,0) 40%, rgba(10,16,22,0.55) 100%);
+    mix-blend-mode:multiply;
+  }
+  /* 번개 플래시 오버레이 */
+  #flash {
+    position:fixed; inset:0; pointer-events:none;
+    background:rgba(200,225,255,1);
+    opacity:0;
+  }
+  #cv { position:fixed; inset:0; display:block; }
+
+  /* 하단 자막: 검은 반투명 50% 판 + 하얀 글자 */
+  #subtitle {
+    position:fixed; left:0; right:0; bottom:0;
+    background:rgba(0,0,0,0.5);
+    color:#ffffff;
+    font-family:-apple-system, 'Segoe UI', 'Malgun Gothic', sans-serif;
+    font-size:20px; letter-spacing:1px; line-height:1.5;
+    text-align:center;
+    padding:22px 18px calc(22px + env(safe-area-inset-bottom));
+    opacity:0; transition:opacity 0.8s ease;
+    pointer-events:none; z-index:8;
+    text-shadow:0 1px 3px rgba(0,0,0,0.6);
+  }
+  #subtitle .caret {
+    display:inline-block; width:2px; margin-left:2px;
+    background:#fff; vertical-align:-2px; height:1em;
+    animation:blink 1s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity:0; } }
+
+  /* 시작 버튼 (브라우저 오디오 정책상 사용자 제스처 필요) */
+  #start {
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:rgba(8,12,16,0.55); cursor:pointer; z-index:10;
+    font-family:-apple-system, 'Segoe UI', sans-serif; color:#cdd6df;
+  }
+  #start .box {
+    text-align:center; padding:24px 30px; border:1px solid rgba(205,214,223,0.25);
+    border-radius:14px; background:rgba(15,22,28,0.55); backdrop-filter:blur(2px);
+  }
+  #start .t { font-size:18px; letter-spacing:2px; opacity:0.92; }
+  #start .s { font-size:12.5px; margin-top:10px; opacity:0.55; }
+</style>
+</head>
+<body>
+  <div id="scene"></div>
+  <canvas id="cv"></canvas>
+  <div id="mood"></div>
+  <div id="flash"></div>
+  <div id="subtitle"><span id="subtext"></span><span class="caret" id="caret" style="display:none"></span></div>
+  <div id="start"><div class="box">
+    <div class="t">비 오는 거리</div>
+    <div class="s">화면을 눌러 시작</div>
+  </div></div>
+
+<script src="three.min.js"></script>
+<script>
+(function(){
+  'use strict';
+
+  // ---------- three.js : 비 + 실루엣 보행자 ----------
+  const canvas = document.getElementById('cv');
+  const renderer = new THREE.WebGLRenderer({ canvas, alpha:true, antialias:true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+  const scene = new THREE.Scene();
+  let W = window.innerWidth, H = window.innerHeight;
+  const camera = new THREE.OrthographicCamera(0, W, H, 0, -1000, 1000);
+
+  function resize(){
+    W = window.innerWidth; H = window.innerHeight;
+    renderer.setSize(W, H);
+    camera.left = 0; camera.right = W; camera.top = H; camera.bottom = 0;
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize', resize);
+
+  // ---------- 빗줄기 ----------
+  const RAIN_COUNT = 520;
+  const rainGeo = new THREE.BufferGeometry();
+  const rPos = new Float32Array(RAIN_COUNT * 6);
+  const rData = [];
+  function seedDrop(i, randomY){
+    const x = Math.random() * (W + 200) - 100;
+    const y = randomY ? Math.random() * H : H + Math.random()*120;
+    const len = 14 + Math.random()*26;
+    const speed = 620 + Math.random()*620;
+    rData[i] = { x, y, len, speed, slant: 2 + Math.random()*3 };
+  }
+  for (let i=0;i<RAIN_COUNT;i++) seedDrop(i, true);
+  rainGeo.setAttribute('position', new THREE.BufferAttribute(rPos, 3));
+  const rainMat = new THREE.LineBasicMaterial({ color:0xbfcad6, transparent:true, opacity:0.34 });
+  const rain = new THREE.LineSegments(rainGeo, rainMat);
+  scene.add(rain);
+
+  function updateRain(dt){
+    for (let i=0;i<RAIN_COUNT;i++){
+      const d = rData[i];
+      d.y -= d.speed * dt;
+      d.x -= d.slant * d.speed * dt * 0.06;
+      if (d.y + d.len < 0 || d.x < -120){ seedDrop(i, false); }
+      const o = i*6;
+      rPos[o+0]=d.x;            rPos[o+1]=d.y;            rPos[o+2]=0;
+      rPos[o+3]=d.x - d.slant;  rPos[o+4]=d.y + d.len;    rPos[o+5]=0;
+    }
+    rainGeo.attributes.position.needsUpdate = true;
+  }
+
+  // ---------- 바닥 빗방울 튀김 ----------
+  const SPL = 60;
+  const splGeo = new THREE.BufferGeometry();
+  const sPos = new Float32Array(SPL*3);
+  const sData = [];
+  function seedSplash(i){
+    sData[i] = {
+      x: Math.random()*W,
+      baseY: H*0.06 + Math.random()*H*0.34,
+      t: Math.random(), life: 0.25 + Math.random()*0.25
+    };
+  }
+  for (let i=0;i<SPL;i++) seedSplash(i);
+  splGeo.setAttribute('position', new THREE.BufferAttribute(sPos,3));
+  const splMat = new THREE.PointsMaterial({ color:0xcdd8e2, size:2.4, transparent:true, opacity:0.5 });
+  const splash = new THREE.Points(splGeo, splMat);
+  scene.add(splash);
+  function updateSplash(dt){
+    for (let i=0;i<SPL;i++){
+      const s = sData[i];
+      s.t += dt;
+      if (s.t > s.life){ seedSplash(i); s.t = 0; }
+      const p = s.t / s.life;
+      const o=i*3;
+      sPos[o]=s.x; sPos[o+1]=s.baseY + Math.sin(p*Math.PI)*8; sPos[o+2]=0;
+    }
+    splGeo.attributes.position.needsUpdate = true;
+  }
+
+  // ---------- 실루엣 보행자 ----------
+  const walker = new THREE.Group();
+  scene.add(walker);
+  const silMat = new THREE.MeshBasicMaterial({ color:0x0c1116, transparent:true, opacity:0.88 });
+
+  function roundedBlob(w,h){
+    const shape = new THREE.Shape();
+    const r = Math.min(w,h)*0.42;
+    const x=-w/2,y=-h/2;
+    shape.moveTo(x+r, y);
+    shape.lineTo(x+w-r, y);
+    shape.quadraticCurveTo(x+w, y, x+w, y+r);
+    shape.lineTo(x+w, y+h-r);
+    shape.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+    shape.lineTo(x+r, y+h);
+    shape.quadraticCurveTo(x, y+h, x, y+h-r);
+    shape.lineTo(x, y+r);
+    shape.quadraticCurveTo(x, y, x+r, y);
+    return new THREE.Mesh(new THREE.ShapeGeometry(shape), silMat);
+  }
+
+  const torso = roundedBlob(34, 60); torso.position.y = 60;
+  const head  = roundedBlob(26, 28); head.position.y = 104;
+  function makeLimb(w,len){
+    const g = new THREE.Group();
+    const m = roundedBlob(w, len);
+    m.position.y = -len/2;
+    g.add(m);
+    return g;
+  }
+  const legL = makeLimb(14, 50); legL.position.set(-8, 34, 0);
+  const legR = makeLimb(14, 50); legR.position.set( 8, 34, 0);
+  const armL = makeLimb(11, 44); armL.position.set(-18, 92, 0); armL.position.z = -1;
+  const armR = makeLimb(11, 44); armR.position.set( 18, 92, 0);
+  // 상체(머리+팔+몸통)를 함께 숙이기 위한 그룹
+  const upper = new THREE.Group();
+  upper.add(armL, armR, torso, head);
+  walker.add(legL, legR, upper);
+
+  // 보행 구간: 화면 하단의 비 젖은 거리(예시 이미지 영역) 안에서만 걷는다.
+  // (three.js 좌표: y=0 바닥, y=H 위. 작은 y = 더 가까움/아래쪽)
+  const PATH = {
+    startX: 0.60, startY: 0.34, startScale: 0.18,   // 멀리(작게) 거리 안쪽
+    endX:   0.47, endY:   0.17, endScale:   0.62     // 가까이(크게) 하단 거리
+  };
+
+  const WALK_SPEED = 0.085;   // progress/s  → 약 12초 보행
+  let progress = 0;           // 0(시작) ~ 1(도착)
+  let walkPhase = 0;
+  let phase = 'idle';         // idle → walk → stop → done
+  let stopTime = 0;
+  let droop = 0;              // 0~1 고개 떨굼 정도
+  let subtitleStarted = false;
+
+  function easeInOut(t){ return t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; }
+  function lerp(a,b,t){ return a+(b-a)*t; }
+
+  function updateWalker(dt){
+    if (phase === 'idle') { layoutStill(); return; }
+
+    if (phase === 'walk'){
+      progress += dt * WALK_SPEED;
+      if (progress >= 1){ progress = 1; phase = 'stop'; stopTime = 0; }
+    }
+
+    const p = progress;
+    const x = lerp(PATH.startX, PATH.endX, p) * W;
+    const y = lerp(PATH.startY, PATH.endY, p) * H;
+    const scale = lerp(PATH.startScale, PATH.endScale, p) * Math.min(W,H)/620;
+    walker.position.set(x, y, 0);
+    walker.scale.set(scale, scale, 1);
+
+    if (phase === 'walk'){
+      // 터벅터벅 보행
+      walkPhase += dt * 4.2;
+      const sw = Math.sin(walkPhase);
+      legL.rotation.z =  sw * 0.5;
+      legR.rotation.z = -sw * 0.5;
+      armL.rotation.z = -sw * 0.35;
+      armR.rotation.z =  sw * 0.35;
+      const bob = Math.abs(Math.cos(walkPhase)) * 5;
+      torso.position.y = 60 - bob;
+      head.position.y  = 104 - bob;
+      head.rotation.z  = Math.sin(walkPhase*0.5)*0.04 - 0.06;
+      upper.rotation.z = 0;
+    } else {
+      // 멈춤 → 다리/팔 중립으로, 고개를 천천히 떨군다
+      stopTime += dt;
+      droop = easeInOut(Math.min(stopTime/1.6, 1));
+      legL.rotation.z = lerp(legL.rotation.z, 0, 0.18);
+      legR.rotation.z = lerp(legR.rotation.z, 0, 0.18);
+      armL.rotation.z = lerp(armL.rotation.z, 0.05, 0.18);
+      armR.rotation.z = lerp(armR.rotation.z, -0.05, 0.18);
+      torso.position.y = 60;
+      // 고개 떨굼: 머리를 어깨로 묻고 앞으로 숙임, 상체도 살짝 수그림
+      head.position.y  = 104 - 16*droop;
+      head.rotation.z  = -0.06 - 0.55*droop;
+      upper.rotation.z = 0.12*droop;       // 상체 슬럼프
+      upper.position.y = -6*droop;
+
+      // 고개를 다 떨군 뒤 자막 시작
+      if (!subtitleStarted && stopTime > 1.7){
+        subtitleStarted = true;
+        startSubtitle('나만 혼자인 것 같다');
+      }
+      if (stopTime > 2 && phase === 'stop') phase = 'done';
+    }
+  }
+
+  // idle(시작 전): 멀리 작은 실루엣을 미리 배치
+  function layoutStill(){
+    const x = PATH.startX*W, y = PATH.startY*H;
+    const scale = PATH.startScale * Math.min(W,H)/620;
+    walker.position.set(x,y,0);
+    walker.scale.set(scale,scale,1);
+  }
+
+  // ---------- 하단 자막 (타자기 효과) ----------
+  const subtitleEl = document.getElementById('subtitle');
+  const subtextEl  = document.getElementById('subtext');
+  const caretEl    = document.getElementById('caret');
+  function startSubtitle(text){
+    subtitleEl.style.opacity = '1';
+    caretEl.style.display = 'inline-block';
+    let i = 0;
+    const tick = ()=>{
+      if (i <= text.length){
+        subtextEl.textContent = text.slice(0, i);
+        i++;
+        setTimeout(tick, 150);
+      } else {
+        // 다 출력하면 잠시 후 커서 숨김
+        setTimeout(()=>{ caretEl.style.display='none'; }, 1400);
+      }
+    };
+    tick();
+  }
+
+  // ---------- 오디오 ----------
+  // 배경음악 = sound/rain.mp3, 천둥은 WebAudio로 합성.
+  let audioCtx = null, noiseBuf = null, bgm = null;
+  function startAudio(){
+    if (audioCtx) return;
+    // 배경음악
+    bgm = new Audio('rain.mp3');
+    bgm.loop = true;
+    bgm.volume = 0.85;
+    bgm.play().catch(()=>{});
+
+    // 천둥용 컨텍스트
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    const sr = audioCtx.sampleRate;
+    noiseBuf = audioCtx.createBuffer(1, 2*sr, sr);
+    const nd = noiseBuf.getChannelData(0);
+    for (let i=0;i<nd.length;i++) nd[i] = Math.random()*2-1;
+    scheduleThunder();
+  }
+
+  function thunder(){
+    if (!audioCtx){ lightning(0.8); return; }
+    const ctx = audioCtx, t0 = ctx.currentTime;
+    const tg = ctx.createGain(); tg.gain.value = 0; tg.connect(ctx.destination);
+    const rumble = ctx.createOscillator(); rumble.type='sine';
+    rumble.frequency.setValueAtTime(70, t0);
+    rumble.frequency.exponentialRampToValueAtTime(28, t0+1.6);
+    const rg = ctx.createGain(); rg.gain.value=0.9; rumble.connect(rg); rg.connect(tg);
+    const nb = ctx.createBufferSource(); nb.buffer = noiseBuf; nb.loop=true;
+    const nf = ctx.createBiquadFilter(); nf.type='lowpass'; nf.frequency.value=900;
+    const ng = ctx.createGain(); ng.gain.value=0.7; nb.connect(nf); nf.connect(ng); ng.connect(tg);
+    nb.start();
+    const peak = 0.5 + Math.random()*0.25;
+    tg.gain.setValueAtTime(0, t0);
+    tg.gain.linearRampToValueAtTime(peak, t0+0.05);
+    tg.gain.exponentialRampToValueAtTime(0.0008, t0+2.4 + Math.random());
+    ng.gain.exponentialRampToValueAtTime(0.02, t0+0.4);
+    rumble.start(t0); rumble.stop(t0+3.2);
+    nb.stop(t0+2.0);
+    lightning(peak);
+  }
+
+  // ---------- 번개 플래시 ----------
+  const flashEl = document.getElementById('flash');
+  function lightning(intensity){
+    intensity = intensity || 0.7;
+    const seq = [0, 0.9, 0.1, 0.7, 0];
+    let t = 0;
+    seq.forEach((v, i)=>{
+      setTimeout(()=>{ flashEl.style.opacity = (v*intensity*0.8).toFixed(3); }, t);
+      t += (i%2===0)? 60 : 90;
+    });
+    setTimeout(()=>{ flashEl.style.opacity = 0; }, t+120);
+  }
+
+  function scheduleThunder(){
+    const wait = 9000 + Math.random()*16000;
+    setTimeout(()=>{ thunder(); scheduleThunder(); }, wait);
+  }
+
+  // ---------- 루프 ----------
+  let last = performance.now();
+  function loop(now){
+    const dt = Math.min((now - last)/1000, 0.05); last = now;
+    updateRain(dt);
+    updateSplash(dt);
+    updateWalker(dt);
+    renderer.render(scene, camera);
+    requestAnimationFrame(loop);
+  }
+
+  resize();
+  layoutStill();
+  requestAnimationFrame(loop);
+
+  // 디버그 훅
+  window.__RAIN = {
+    thunderNow: thunder,
+    skipToStop: ()=>{ progress = 1; phase='stop'; stopTime=0; },
+    // 헤드리스(탭 hidden)에서 rAF가 멈출 때 시뮬레이션을 수동으로 진행하기 위한 디버그 스텝
+    step: (dt)=>{ updateWalker(dt||0.05); },
+    state: ()=>({ progress:+progress.toFixed(3), phase, droop:+droop.toFixed(2),
+                  subtitle: subtextEl.textContent, hasAudio: !!audioCtx })
+  };
+
+  // 시작
+  const startEl = document.getElementById('start');
+  function begin(){
+    if (phase !== 'idle') return;
+    startEl.style.transition='opacity .6s'; startEl.style.opacity='0';
+    setTimeout(()=>startEl.remove(), 650);
+    phase = 'walk';
+    startAudio();
+  }
+  startEl.addEventListener('click', begin);
+  startEl.addEventListener('touchstart', begin, {passive:true});
+})();
+</script>
+</body>
+</html>

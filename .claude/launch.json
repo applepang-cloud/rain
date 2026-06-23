@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "rain",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8883"],
+      "port": 8883,
+      "cwd": "C:\\c_c\\rain\\web"
+    }
+  ]
+}

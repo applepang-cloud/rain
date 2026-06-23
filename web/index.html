@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>비 오는 거리</title>
+<style>
+  html, body { margin:0; padding:0; height:100%; background:#1a1f24; overflow:hidden; }
+  #scene {
+    position:fixed; inset:0;
+    background-image:url('rain.png');
+    background-size:cover;
+    background-position:center;
+  }
+  /* 전체 화면을 살짝 가라앉히는 비 오는 분위기 틴트 */
+  #mood {
+    position:fixed; inset:0; pointer-events:none;
+    background:radial-gradient(120% 80% at 60% 35%, rgba(20,30,38,0) 40%, rgba(10,16,22,0.55) 100%);
+    mix-blend-mode:multiply;
+  }
+  /* 번개 플래시 오버레이 */
+  #flash {
+    position:fixed; inset:0; pointer-events:none;
+    background:rgba(200,225,255,1);
+    opacity:0;
+  }
+  #cv { position:fixed; inset:0; display:block; }
+  /* 시작 버튼 (브라우저 오디오 정책상 사용자 제스처 필요) */
+  #start {
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:rgba(8,12,16,0.55); cursor:pointer; z-index:10;
+    font-family:-apple-system, 'Segoe UI', sans-serif; color:#cdd6df;
+  }
+  #start .box {
+    text-align:center; padding:24px 30px; border:1px solid rgba(205,214,223,0.25);
+    border-radius:14px; background:rgba(15,22,28,0.55); backdrop-filter:blur(2px);
+  }
+  #start .t { font-size:18px; letter-spacing:2px; opacity:0.92; }
+  #start .s { font-size:12.5px; margin-top:10px; opacity:0.55; }
+</style>
+</head>
+<body>
+  <div id="scene"></div>
+  <canvas id="cv"></canvas>
+  <div id="mood"></div>
+  <div id="flash"></div>
+  <div id="start"><div class="box">
+    <div class="t">비 오는 거리</div>
+    <div class="s">화면을 눌러 시작</div>
+  </div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+  'use strict';
+
+  // ---------- three.js : 비 + 실루엣 보행자 ----------
+  const canvas = document.getElementById('cv');
+  const renderer = new THREE.WebGLRenderer({ canvas, alpha:true, antialias:true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+  const scene = new THREE.Scene();
+  // 직교 카메라: 화면 좌표(0..W, 0..H)와 거의 1:1
+  let W = window.innerWidth, H = window.innerHeight;
+  const camera = new THREE.OrthographicCamera(0, W, H, 0, -1000, 1000);
+
+  function resize(){
+    W = window.innerWidth; H = window.innerHeight;
+    renderer.setSize(W, H);
+    camera.left = 0; camera.right = W; camera.top = H; camera.bottom = 0;
+    camera.updateProjectionMatrix();
+    layoutWalker();
+  }
+  window.addEventListener('resize', resize);
+
+  // ---------- 빗줄기 (라인 세그먼트) ----------
+  const RAIN_COUNT = 520;
+  const rainGeo = new THREE.BufferGeometry();
+  const rPos = new Float32Array(RAIN_COUNT * 6); // 두 점(line) * xyz
+  const rData = []; // {x,y,len,speed}
+  function seedDrop(i, randomY){
+    const x = Math.random() * (W + 200) - 100;
+    const y = randomY ? Math.random() * H : H + Math.random()*120;
+    const len = 14 + Math.random()*26;
+    const speed = 620 + Math.random()*620;
+    rData[i] = { x, y, len, speed, slant: 2 + Math.random()*3 };
+  }
+  for (let i=0;i<RAIN_COUNT;i++) seedDrop(i, true);
+  rainGeo.setAttribute('position', new THREE.BufferAttribute(rPos, 3));
+  const rainMat = new THREE.LineBasicMaterial({ color:0xbfcad6, transparent:true, opacity:0.34 });
+  const rain = new THREE.LineSegments(rainGeo, rainMat);
+  scene.add(rain);
+
+  function updateRain(dt){
+    for (let i=0;i<RAIN_COUNT;i++){
+      const d = rData[i];
+      d.y -= d.speed * dt;
+      d.x -= d.slant * d.speed * dt * 0.06;
+      if (d.y + d.len < 0 || d.x < -120){ seedDrop(i, false); }
+      const o = i*6;
+      rPos[o+0]=d.x;            rPos[o+1]=d.y;            rPos[o+2]=0;
+      rPos[o+3]=d.x - d.slant;  rPos[o+4]=d.y + d.len;    rPos[o+5]=0;
+    }
+    rainGeo.attributes.position.needsUpdate = true;
+  }
+
+  // ---------- 바닥 빗방울 튀김 (작은 점들) ----------
+  const SPL = 60;
+  const splGeo = new THREE.BufferGeometry();
+  const sPos = new Float32Array(SPL*3);
+  const sData = [];
+  // 도로면(이미지상 화면 하단 영역)에서 튀김
+  function seedSplash(i){
+    sData[i] = {
+      x: Math.random()*W,
+      baseY: H*0.06 + Math.random()*H*0.34,
+      t: Math.random(), life: 0.25 + Math.random()*0.25
+    };
+  }
+  for (let i=0;i<SPL;i++) seedSplash(i);
+  splGeo.setAttribute('position', new THREE.BufferAttribute(sPos,3));
+  const splMat = new THREE.PointsMaterial({ color:0xcdd8e2, size:2.4, transparent:true, opacity:0.5 });
+  const splash = new THREE.Points(splGeo, splMat);
+  scene.add(splash);
+  function updateSplash(dt){
+    for (let i=0;i<SPL;i++){
+      const s = sData[i];
+      s.t += dt;
+      if (s.t > s.life){ seedSplash(i); s.t = 0; }
+      const p = s.t / s.life;
+      const o=i*3;
+      sPos[o]=s.x; sPos[o+1]=s.baseY + Math.sin(p*Math.PI)*8; sPos[o+2]=0;
+    }
+    splGeo.attributes.position.needsUpdate = true;
+  }
+
+  // ---------- 실루엣 보행자 ----------
+  // 어두운 반투명 그림자 형태. 몸통/머리/다리/팔 + 다리·팔 스윙으로 터벅터벅.
+  const walker = new THREE.Group();
+  scene.add(walker);
+  const silMat = new THREE.MeshBasicMaterial({ color:0x0c1116, transparent:true, opacity:0.86 });
+
+  function roundedBlob(w,h){
+    const shape = new THREE.Shape();
+    const r = Math.min(w,h)*0.42;
+    shape.absarc(0, 0, 0, 0, 0, false); // placeholder
+    // 둥근 사각형
+    const x=-w/2,y=-h/2;
+    shape.moveTo(x+r, y);
+    shape.lineTo(x+w-r, y);
+    shape.quadraticCurveTo(x+w, y, x+w, y+r);
+    shape.lineTo(x+w, y+h-r);
+    shape.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+    shape.lineTo(x+r, y+h);
+    shape.quadraticCurveTo(x, y+h, x, y+h-r);
+    shape.lineTo(x, y+r);
+    shape.quadraticCurveTo(x, y, x+r, y);
+    return new THREE.Mesh(new THREE.ShapeGeometry(shape), silMat);
+  }
+
+  // 기준 크기(픽셀). 보행자는 scale로 원근(다가옴) 표현.
+  const torso = roundedBlob(34, 60); torso.position.y = 60;
+  const head  = roundedBlob(26, 28); head.position.y = 104;
+  // 다리 2개 (피벗을 위쪽에 두기 위해 그룹 사용)
+  function makeLimb(w,len){
+    const g = new THREE.Group();
+    const m = roundedBlob(w, len);
+    m.position.y = -len/2;       // 피벗(0) 기준 아래로 늘어짐
+    g.add(m);
+    return g;
+  }
+  const legL = makeLimb(14, 50); legL.position.set(-8, 34, 0);
+  const legR = makeLimb(14, 50); legR.position.set( 8, 34, 0);
+  const armL = makeLimb(11, 44); armL.position.set(-18, 92, 0); armL.position.z = -1;
+  const armR = makeLimb(11, 44); armR.position.set( 18, 92, 0);
+  // 어깨/우산 느낌의 살짝 숙인 후드
+  walker.add(legL, legR, armL, armR, torso, head);
+
+  let walkPhase = 0;
+  // 보행자 진행: 화면 멀리(작게)에서 가까이(크게)로 "다가옴". 끝나면 다시 멀리서 시작.
+  let progress = 0.12; // 0(멀다)~1(가깝다)
+  function layoutWalker(){ /* resize시 즉시 반영용 (updateWalker가 매 프레임 처리) */ }
+
+  function updateWalker(dt){
+    // 진행 (천천히 다가옴)
+    progress += dt * 0.020;
+    if (progress > 1.08){ progress = 0.08; }
+    const p = progress;
+
+    // 화면상 경로: 거리 안쪽(중앙 상단)에서 좌하단 인도 쪽으로 터벅터벅 다가옴
+    const startX = W*0.46, startY = H*0.42;
+    const endX   = W*0.30, endY   = H*0.10;
+    const x = startX + (endX-startX)*p;
+    const y = startY + (endY-startY)*p;
+
+    // 원근 스케일: 멀면 작게, 가까우면 크게
+    const scale = (0.16 + p*0.62) * Math.min(W,H)/620;
+    walker.position.set(x, y, 0);
+    walker.scale.set(scale, scale, 1);
+
+    // 걸음 보행 사이클 (속도는 진행+살짝 상수)
+    walkPhase += dt * 4.2;
+    const sw = Math.sin(walkPhase);
+    legL.rotation.z =  sw * 0.5;
+    legR.rotation.z = -sw * 0.5;
+    armL.rotation.z = -sw * 0.35;
+    armR.rotation.z =  sw * 0.35;
+    // 상하 바운스 (터벅터벅)
+    const bob = Math.abs(Math.cos(walkPhase)) * 5;
+    torso.position.y = 60 - bob;
+    head.position.y  = 104 - bob;
+    head.rotation.z  = Math.sin(walkPhase*0.5)*0.04 - 0.06; // 살짝 숙임
+  }
+
+  // ---------- 오디오 (WebAudio 합성) ----------
+  let audio = null;
+  function startAudio(){
+    if (audio) return;
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const master = ctx.createGain(); master.gain.value = 0.0; master.connect(ctx.destination);
+    master.gain.setTargetAtTime(0.9, ctx.currentTime, 1.2);
+
+    // 1) 빗소리 = 화이트노이즈 + 로우패스
+    const bufSize = 2*ctx.sampleRate;
+    const noiseBuf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+    const nd = noiseBuf.getChannelData(0);
+    for (let i=0;i<bufSize;i++) nd[i] = Math.random()*2-1;
+    const noise = ctx.createBufferSource(); noise.buffer = noiseBuf; noise.loop = true;
+    const lp = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=1700; lp.Q.value=0.6;
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=380;
+    const rainGain = ctx.createGain(); rainGain.gain.value = 0.16;
+    noise.connect(hp); hp.connect(lp); lp.connect(rainGain); rainGain.connect(master);
+    noise.start();
+
+    // 빗소리 미세한 일렁임
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.08;
+    const lfoGain = ctx.createGain(); lfoGain.gain.value = 0.04;
+    lfo.connect(lfoGain); lfoGain.connect(rainGain.gain); lfo.start();
+
+    // 2) 잔잔한 앰비언트 패드 (느린 마이너 코드)
+    const padGain = ctx.createGain(); padGain.gain.value = 0.0; padGain.connect(master);
+    padGain.gain.setTargetAtTime(0.05, ctx.currentTime, 4);
+    const chord = [146.83, 174.61, 220.0, 293.66]; // D minor-ish
+    chord.forEach((f, idx)=>{
+      const o = ctx.createOscillator(); o.type='sine'; o.frequency.value=f;
+      const g = ctx.createGain(); g.gain.value = (idx===0?0.5:0.32);
+      // 아주 느린 디튠 일렁임
+      const d = ctx.createOscillator(); d.frequency.value = 0.03 + idx*0.01;
+      const dg = ctx.createGain(); dg.gain.value = 0.6;
+      d.connect(dg); dg.connect(o.detune); d.start();
+      o.connect(g); g.connect(padGain); o.start();
+    });
+
+    // 3) 천둥 = 노이즈 버스트 + 저주파 럼블
+    function thunder(){
+      const t0 = ctx.currentTime;
+      const tg = ctx.createGain(); tg.gain.value = 0; tg.connect(master);
+      // 럼블
+      const rumble = ctx.createOscillator(); rumble.type='sine';
+      rumble.frequency.setValueAtTime(70, t0);
+      rumble.frequency.exponentialRampToValueAtTime(28, t0+1.6);
+      const rg = ctx.createGain(); rg.gain.value=0; rumble.connect(rg); rg.connect(tg);
+      // 크랙(노이즈 버스트)
+      const nb = ctx.createBufferSource(); nb.buffer = noiseBuf; nb.loop=true;
+      const nf = ctx.createBiquadFilter(); nf.type='lowpass'; nf.frequency.value=900;
+      const ng = ctx.createGain(); ng.gain.value=0; nb.connect(nf); nf.connect(ng); ng.connect(tg);
+      nb.start();
+      // 엔벨로프
+      const peak = 0.55 + Math.random()*0.25;
+      tg.gain.setValueAtTime(0, t0);
+      tg.gain.linearRampToValueAtTime(peak, t0+0.05);
+      tg.gain.exponentialRampToValueAtTime(0.0008, t0+2.4 + Math.random());
+      rg.gain.setValueAtTime(0.9, t0);
+      ng.gain.setValueAtTime(0.7, t0);
+      ng.gain.exponentialRampToValueAtTime(0.02, t0+0.4);
+      rumble.start(t0); rumble.stop(t0+3.2);
+      nb.stop(t0+2.0);
+      // 화면 번개 플래시 동기화
+      lightning(peak);
+    }
+    audio = { ctx, thunder };
+    scheduleThunder();
+  }
+
+  // ---------- 번개 플래시 ----------
+  const flashEl = document.getElementById('flash');
+  function lightning(intensity){
+    intensity = intensity || 0.7;
+    const seq = [0, 0.9, 0.1, 0.7, 0]; // 깜빡임
+    let t = 0;
+    seq.forEach((v, i)=>{
+      setTimeout(()=>{ flashEl.style.opacity = (v*intensity*0.8).toFixed(3); }, t);
+      t += (i%2===0)? 60 : 90;
+    });
+    setTimeout(()=>{ flashEl.style.opacity = 0; }, t+120);
+  }
+
+  // 천둥 스케줄 (가끔)
+  function scheduleThunder(){
+    const wait = 9000 + Math.random()*16000; // 9~25초
+    setTimeout(()=>{
+      if (audio) audio.thunder();
+      scheduleThunder();
+    }, wait);
+  }
+
+  // ---------- 루프 ----------
+  let last = performance.now();
+  function loop(now){
+    const dt = Math.min((now - last)/1000, 0.05); last = now;
+    updateRain(dt);
+    updateSplash(dt);
+    updateWalker(dt);
+    renderer.render(scene, camera);
+    requestAnimationFrame(loop);
+  }
+
+  resize();
+  requestAnimationFrame(loop);
+
+  // 디버그 훅
+  window.__RAIN = { thunderNow: ()=>{ if(audio) audio.thunder(); else lightning(0.8); },
+                    state: ()=>({ progress, hasAudio: !!audio }) };
+
+  // 시작
+  const startEl = document.getElementById('start');
+  function begin(){
+    startEl.style.transition='opacity .6s'; startEl.style.opacity='0';
+    setTimeout(()=>startEl.remove(), 650);
+    startAudio();
+  }
+  startEl.addEventListener('click', begin);
+  startEl.addEventListener('touchstart', begin, {passive:true});
+})();
+</script>
+</body>
+</html>
