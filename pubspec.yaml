@@ -64,6 +64,12 @@ flutter:
     - assets/game/three.min.js
     - assets/game/rain.png
     - assets/game/rain.mp3
+    - assets/game/1.png
+    - assets/game/2.png
+    - assets/game/3.png
+    - assets/game/4.png
+    - assets/game/5.png
+    - assets/game/6.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
